@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
 
@@ -52,41 +53,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cliUrl := *r.URL
-	cliUrl.Scheme = "http"
-	cliUrl.Host = fmt.Sprintf("%s:%d", service.Address, service.Port)
-
-	cliReq, err := http.NewRequest(r.Method, cliUrl.String(), r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	backendURL := &url.URL{
+		Scheme: "http",
+		Host:   fmt.Sprintf("%s:%d", service.Address, service.Port),
 	}
-	CopyHeaders(cliReq.Header, r.Header)
-	cliReq.Host = r.Host
-	cliReq = cliReq.WithContext(r.Context())
-
-	httpClient := http.Client{
-		Transport: http.DefaultTransport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	resp, err := httpClient.Do(cliReq)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	CopyHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		log.Println("Error copying response:", err)
-		return
-	}
+	proxy := httputil.NewSingleHostReverseProxy(backendURL)
+	proxy.ServeHTTP(w, r)
 }
 
 func main() {
